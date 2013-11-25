@@ -1,0 +1,21 @@
+{
+  "name": "jsTeaser",
+  "author": {
+    "name": "Paul Mölders",
+    "email": "paulmoelders@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/p0wl/jsTeaser.git"
+  },
+  "version": "0.0.1",
+  "licenses": [
+    {
+      "type": "MIT",
+      "url": "https://raw.github.com/jashkenas/underscore/master/LICENSE"
+    }
+  ],
+  "dependencies": {
+    "underscore": "~1.5.2"
+  }
+}
