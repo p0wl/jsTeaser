@@ -9,6 +9,9 @@ var jsTeaser = (function () {
 	var ideal = 20;
 
 	that.summarize = function (title, text) {
+		title = title.toLowerCase();
+		text = text.toLowerCase();
+
 		var summaries = [];
 	
 
@@ -18,7 +21,6 @@ var jsTeaser = (function () {
 		var titleWords = splitWords(title);
 
 		var ranks = score(sentences, titleWords, keys);
-
 		summaries = _.chain(ranks)
 					.sortBy(function (x) { return Number(-x.score) || 0; })
 					.pluck('sentence')
@@ -47,6 +49,13 @@ var jsTeaser = (function () {
 
 			//weighted average of scores from four categories
 			totalScore = (titleFeature*1.5 + frequency*2.0 + sentenceLength*1.0 + sentencePositionVar*1.0)/4.0;
+
+			/*
+			console.log('-------------------------------');
+			console.log('SENTENCE: ' + s);
+			console.log('titleFeature: ' + titleFeature + '	sentenceLength: ' + sentenceLength + '	sentencePositionVar: ' + sentencePositionVar+ '	sbsFeature: ' + sbsFeature + '	dbsFeature: ' + dbsFeature + '	frequency: ' + frequency);
+			console.log('TOTAL SCORE: ' + totalScore);
+			*/
 			ranks.push({sentence: s, score: totalScore});
 		}
 		return ranks;
@@ -57,38 +66,38 @@ var jsTeaser = (function () {
 		if (words.length == 0) return 0;
 
 		words.forEach(function (word) {
-			score += keywords[word] || 0;
+			score += getWordCount(word, keywords);
 		});
 
-		return (1.0 / Math.abs(words.length)) * score / 10.0;
+		return (1.0 / Math.abs(words.length) * score) / 10.0;
 	}
 
 	var dbs = function(words, keywords) {
 		if (words.length == 0) { return 0 };
 
 		var summ = 0;
-		var first = [];
-		var second = [];
+		var first = null;
+		var second = {};
 
 		for (var i = 0; i < words.length; i++)
 		{
 			var word = words[i];
-			if (word in keywords) {
-				var score = keywords[word];
-				if (first.length === 0) {
-					first[i] = score;
+			var score = getWordCount(word, keywords);
+			if (score > 0) {
+				if (first === null) {
+					first = {num: i, score: score};
+
 				} else {
 					second = first;
-					first[i] = score;
-					dif = first[0] - second[0];
-					summ += (first[1]*second[1]) / Math.pow(dif, 2);
+					first = {num: i, score: score};
+					dif = first.num - second.num;
+					summ += (first.score*second.score) / Math.pow(dif, 2);
 				}
 			}
 		}
 		// TODO: Translate better: var k = len(set(keywords.keys()).intersection(set(words)))+1 //number of intersections
-		var k = _.intersection(Object.keys(keywords),words).length + 1
-
-		return (1/(k*(k+1.0))*summ)
+		var k = _.intersection(_.chain(keywords).pluck('word').toArray().value(),words).length + 1;
+		return (1/(k*(k+1.0))*summ);
 	}
 
 	var splitWords = function (text) {
@@ -104,21 +113,13 @@ var jsTeaser = (function () {
 		
 		text = removeStopWords(text);
 
-	    /** replacable by most common ?? **/
-		var freq = [];
-		text.forEach(function (word) {
-			freq[word] = (freq[word] || 0) + 1;
-		});
-		
-		var minSize = _(freq).keys().length < 10 ? freq.length : 10;
-		keywords = mostCommon(text,minSize);
+		keywords = mostCommon(text);
 
-		_.chain(keywords).keys().each(function (k) {
-			var v = keywords[k];
-			var articleScore = keywords[k]*1.0 / numWords;
-			keywords[k] = articleScore * 1.5 + 1;
+		_.chain(keywords).each(function (k) {
+			var v = k.sum;
+			var articleScore = v*1.0 / numWords;
+			k.sum = articleScore * 1.5 + 1;
 		});
-
 		return keywords;
 	}
 
@@ -135,13 +136,15 @@ var jsTeaser = (function () {
 
 	var titleScore = function(title, sentence) {
 		title = removeStopWords(title);
+		sentence = removeStopWords(sentence);
 		count = 0;
 		_.each(sentence, function (word) {
-			if (!_.contains(stopWords, word) && _.contains(title, word))
+			if (_.contains(title, word))
 			{
 				count += 1;
 			}
 		});
+
 		return count / title.length;
 	}
 
@@ -182,26 +185,37 @@ var jsTeaser = (function () {
 
 
 	/** HELPER **/
-	var mostCommon = function (words, top) {
-		var res = _.chain(words)
-					//.without('') necessary??
-					.groupBy(function (word) { return word.toLowerCase(); })
-					.sortBy(function (word) { return -word.length; })
-		
-		if (top) {
-			res = res.first(top);
-		}
-        
-        var count = [];
-        res.each(function(x) {
-            count[x[0]] = x.length;
-        });
+	var mostCommon = function (text, top) {
 
-		return count;
+ 		/** replacable by most common ?? **/
+		var freq = [];
+		text.forEach(function (word) {
+			freq[word] = (freq[word] || 0) + 1;
+		});
+
+		var countKeys = _(freq).keys().length;
+		var minSize = countKeys < 10 ? countKeys : 10;
+
+		var res = [];
+		_.chain(freq).keys().each(function (w) {
+			res.push({word: w, sum: freq[w]});
+		}).value();
+
+		var ordered =  _.chain(res)
+						.sortBy(function (w) {	return -w.sum; })
+						.first(10)
+						.value();
+
+		return ordered;		
 	}
 
 	var removeStopWords = function (text) {
 		return _.difference(text, stopWords);
+	}
+
+	var getWordCount = function (word, words) {
+		var x = _.findWhere(words, {word: word});
+		return x ? x.sum : 0;
 	}
 
 	return that;
@@ -214,8 +228,9 @@ module.exports = jsTeaser;
 
 var main = function () {
 
-	var result = jsTeaser.summarize('Twitters Forward Secrecy Takes Step To Make It Harder To Spy On Its Users', '(Reuters) - Twitter Inc said it has implemented a security technology that makes it harder to spy on its users and called on other Internet firms to do the same, as Web providers look to thwart spying by government intelligence agencies. The online messaging service, which began scrambling communications in 2011 using traditional HTTPS encryption, said on Friday it has added an advanced layer of protection for HTTPS known as "forward secrecy." "A year and a half ago, Twitter was first served completely over HTTPS," the company said in a blog posting. "Since then, it has become clearer and clearer how important that step was to protecting our users privacy." Twitters move is the latest response from U.S. Internet firms following disclosures by former spy agency contractor Edward Snowden about widespread, classified U.S. government surveillance programs. Facebook Inc, Google Inc, Microsoft Corp and Yahoo Inc have publicly complained that the government does not let them disclose data collection efforts. Some have adopted new privacy technologies to better secure user data. Forward secrecy prevents attackers from exploiting one potential weakness in HTTPS, which is that large quantities of data can be unscrambled if spies are able to steal a single private "key" that is then used to encrypt all the data, said Dan Kaminsky, a well-known Internet security expert. The more advanced technique repeatedly creates individual keys as new communications sessions are opened, making it impossible to use a master key to decrypt them, Kaminsky said. "It is a good thing to do," he said. "Im glad this is the direction the industry is taking."');
-	//console.log(result);
+	//var result = jsTeaser.summarize('Twitters Forward Secrecy Takes Step To Make It Harder To Spy On Its Users', '(Reuters) - Twitter Inc said it has implemented a security technology that makes it harder to spy on its users and called on other Internet firms to do the same, as Web providers look to thwart spying by government intelligence agencies. The online messaging service, which began scrambling communications in 2011 using traditional HTTPS encryption, said on Friday it has added an advanced layer of protection for HTTPS known as "forward secrecy." "A year and a half ago, Twitter was first served completely over HTTPS," the company said in a blog posting. "Since then, it has become clearer and clearer how important that step was to protecting our users privacy." Twitters move is the latest response from U.S. Internet firms following disclosures by former spy agency contractor Edward Snowden about widespread, classified U.S. government surveillance programs. Facebook Inc, Google Inc, Microsoft Corp and Yahoo Inc have publicly complained that the government does not let them disclose data collection efforts. Some have adopted new privacy technologies to better secure user data. Forward secrecy prevents attackers from exploiting one potential weakness in HTTPS, which is that large quantities of data can be unscrambled if spies are able to steal a single private "key" that is then used to encrypt all the data, said Dan Kaminsky, a well-known Internet security expert. The more advanced technique repeatedly creates individual keys as new communications sessions are opened, making it impossible to use a master key to decrypt them, Kaminsky said. "It is a good thing to do," he said. "Im glad this is the direction the industry is taking."');
+	var result = jsTeaser.summarize('Framework for Partitioning and Execution of Data Stream Applications in Mobile Cloud Computing', 'The contribution of cloud computing and mobile computing technologies lead to the newly emerging mobile cloud com- puting paradigm. Three major approaches have been pro- posed for mobile cloud applications: 1) extending the access to cloud services to mobile devices; 2) enabling mobile de- vices to work collaboratively as cloud resource providers; 3) augmenting the execution of mobile applications on portable devices using cloud resources. In this paper, we focus on the third approach in supporting mobile data stream applica- tions. More specifically, we study how to optimize the com- putation partitioning of a data stream application between mobile and cloud to achieve maximum speed/throughput in processing the streaming data. To the best of our knowledge, it is the first work to study the partitioning problem for mobile data stream applica- tions, where the optimization is placed on achieving high throughput of processing the streaming data rather than minimizing the makespan of executions as in other appli- cations. We first propose a framework to provide runtime support for the dynamic computation partitioning and exe- cution of the application. Different from existing works, the framework not only allows the dynamic partitioning for a single user but also supports the sharing of computation in- stances among multiple users in the cloud to achieve efficient utilization of the underlying cloud resources. Meanwhile, the framework has better scalability because it is designed on the elastic cloud fabrics. Based on the framework, we design a genetic algorithm for optimal computation parti- tion. Both numerical evaluation and real world experiment have been performed, and the results show that the par- titioned application can achieve at least two times better performance in terms of throughput than the application without partitioning.');
+	console.log(result);
 }
 
 main();
